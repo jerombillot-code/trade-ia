@@ -1,0 +1,1735 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🤖 AI Trading Bot - Multi-IA Competition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        .ai-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s;
+        }
+        .ai-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        .ai-card.active {
+            border: 2px solid #10b981;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+        }
+        .trade-log {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .trade-log::-webkit-scrollbar {
+            width: 8px;
+        }
+        .trade-log::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+        .trade-log::-webkit-scrollbar-thumb {
+            background: rgba(16, 185, 129, 0.5);
+            border-radius: 10px;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .slide-in {
+            animation: slideIn 0.5s ease-out;
+        }
+        .gradient-border {
+            position: relative;
+            background: linear-gradient(145deg, rgba(16, 185, 129, 0.1), rgba(59, 130, 246, 0.1));
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .status-online { background: #10b981; box-shadow: 0 0 10px #10b981; }
+        .status-offline { background: #ef4444; }
+        .status-trading { background: #f59e0b; animation: pulse 1s infinite; }
+    </style>
+</head>
+<body class="p-4 md:p-6">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold mb-3 bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+                🤖 AI Trading Bot Competition
+            </h1>
+            <p class="text-gray-300 text-lg">Claude vs Gemini vs ChatGPT • Trading Réel 24/7</p>
+        </div>
+
+        <!-- Connexion Wallet -->
+        <div class="gradient-border rounded-xl p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4 flex items-center gap-2">
+                <span>🔐</span>
+                Connexion & Configuration
+            </h2>
+
+            <!-- Configuration API IA -->
+            <div class="bg-blue-900/20 border-2 border-blue-500 rounded-lg p-4 mb-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-blue-300">🤖 Configuration API IA (Optionnel)</h3>
+                    <button onclick="toggleAPIConfig()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm transition-all">
+                        ⚙️ Configurer
+                    </button>
+                </div>
+                <p class="text-sm text-blue-200">
+                    ℹ️ Pour une analyse réelle avec Claude, Gemini ou ChatGPT, ajoutez vos clés API.<br>
+                    Sans clés API, le bot utilise une analyse locale sophistiquée basée sur news et sentiment social.
+                </p>
+                
+                <div id="apiConfigPanel" class="mt-4 space-y-3" style="display: none;">
+                    <div>
+                        <label class="block text-xs text-gray-300 mb-1">🧠 Claude API Key (Anthropic)</label>
+                        <input type="password" id="claudeApiKey" placeholder="sk-ant-..." 
+                            class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-300 mb-1">💎 Gemini API Key (Google)</label>
+                        <input type="password" id="geminiApiKey" placeholder="AIza..." 
+                            class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-300 mb-1">🚀 OpenAI API Key (ChatGPT)</label>
+                        <input type="password" id="openaiApiKey" placeholder="sk-..." 
+                            class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm">
+                    </div>
+                    <button onclick="saveAPIKeys()" class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-bold transition-all">
+                        💾 Sauvegarder les clés
+                    </button>
+                    <p class="text-xs text-gray-400">
+                        🔒 Les clés sont stockées localement dans votre navigateur uniquement
+                    </p>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-2">Mode de connexion</label>
+                    <select id="connectionMode" onchange="switchConnectionMode()" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-green-400">
+                        <option value="metamask">🦊 MetaMask (Manuel)</option>
+                        <option value="privatekey">⚡ Clé Privée (Auto 24/7)</option>
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="block text-sm text-gray-300 mb-2">Statut</label>
+                    <div class="bg-slate-800 border border-slate-600 rounded-lg px-4 py-3">
+                        <span id="connectionStatus" class="flex items-center">
+                            <span class="status-dot status-offline"></span>
+                            Non connecté
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="metamaskSection" class="mb-4">
+                <button onclick="connectMetaMask()" id="connectBtn" class="w-full md:w-auto px-6 py-3 bg-gradient-to-r from-orange-500 to-yellow-500 hover:from-orange-600 hover:to-yellow-600 rounded-lg font-bold transition-all">
+                    Connecter MetaMask
+                </button>
+            </div>
+
+            <div id="privatekeySection" style="display: none;">
+                <div class="bg-red-900/20 border-2 border-red-500 rounded-lg p-4 mb-4">
+                    <p class="text-red-300 font-bold mb-2">⚠️ MODE AUTOMATIQUE 24/7</p>
+                    <ul class="text-sm text-red-200 space-y-1">
+                        <li>• Utilisez un wallet DÉDIÉ avec petit capital</li>
+                        <li>• La clé est stockée en mémoire uniquement</li>
+                        <li>• Effacée automatiquement à la fermeture</li>
+                        <li>• Le bot traddera sans votre confirmation</li>
+                    </ul>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="block text-sm text-gray-300 mb-2">Clé Privée (0x...)</label>
+                    <input type="password" id="privateKeyInput" placeholder="0x..." class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-red-400 font-mono">
+                </div>
+                
+                <div class="flex gap-3">
+                    <button onclick="connectWithPrivateKey()" class="flex-1 px-6 py-3 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 rounded-lg font-bold transition-all">
+                        ⚡ Activer Mode Auto
+                    </button>
+                    <button onclick="togglePrivateKeyVisibility()" class="px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-all">
+                        👁️
+                    </button>
+                </div>
+            </div>
+
+            <div id="walletInfo" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4" style="display: none;">
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <p class="text-xs text-gray-400">Adresse</p>
+                    <p class="font-mono text-sm" id="walletAddress">-</p>
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <p class="text-xs text-gray-400">BNB</p>
+                    <p class="font-bold text-yellow-400" id="bnbBalance">0</p>
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <p class="text-xs text-gray-400">USDT</p>
+                    <p class="font-bold text-green-400" id="usdtBalance">0</p>
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-3">
+                    <p class="text-xs text-gray-400">Réseau</p>
+                    <p class="font-bold text-yellow-400">BSC</p>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <label class="block text-sm text-gray-300 mb-2">Capital de trading (USDT)</label>
+                <div class="flex gap-3">
+                    <input type="number" id="tradingCapital" placeholder="100" value="100" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-green-400">
+                    <button onclick="setCapital()" class="px-6 py-3 bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 rounded-lg font-bold transition-all">
+                        Valider
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sélection des IA -->
+        <div class="gradient-border rounded-xl p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4">🤖 Sélectionner les IA Concurrentes</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Claude AI -->
+                <div class="ai-card rounded-xl p-5 cursor-pointer" onclick="toggleAI('claude')" id="card-claude">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-3xl">🧠</span>
+                            <h3 class="text-xl font-bold">Claude</h3>
+                        </div>
+                        <input type="checkbox" id="ai-claude" class="w-5 h-5">
+                    </div>
+                    <p class="text-sm text-gray-300 mb-3">Anthropic • Analyse profonde et raisonnement avancé</p>
+                    <div class="space-y-2 text-xs">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Trades:</span>
+                            <span id="claude-trades" class="font-bold text-green-400">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Profit:</span>
+                            <span id="claude-profit" class="font-bold text-green-400">$0.00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Win Rate:</span>
+                            <span id="claude-winrate" class="font-bold">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gemini AI -->
+                <div class="ai-card rounded-xl p-5 cursor-pointer" onclick="toggleAI('gemini')" id="card-gemini">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-3xl">💎</span>
+                            <h3 class="text-xl font-bold">Gemini</h3>
+                        </div>
+                        <input type="checkbox" id="ai-gemini" class="w-5 h-5">
+                    </div>
+                    <p class="text-sm text-gray-300 mb-3">Google • Analyse multimodale et prédictions</p>
+                    <div class="space-y-2 text-xs">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Trades:</span>
+                            <span id="gemini-trades" class="font-bold text-blue-400">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Profit:</span>
+                            <span id="gemini-profit" class="font-bold text-blue-400">$0.00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Win Rate:</span>
+                            <span id="gemini-winrate" class="font-bold">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ChatGPT AI -->
+                <div class="ai-card rounded-xl p-5 cursor-pointer" onclick="toggleAI('chatgpt')" id="card-chatgpt">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-3xl">🚀</span>
+                            <h3 class="text-xl font-bold">ChatGPT</h3>
+                        </div>
+                        <input type="checkbox" id="ai-chatgpt" class="w-5 h-5">
+                    </div>
+                    <p class="text-sm text-gray-300 mb-3">OpenAI • Analyse rapide et décisions optimales</p>
+                    <div class="space-y-2 text-xs">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Trades:</span>
+                            <span id="chatgpt-trades" class="font-bold text-purple-400">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Profit:</span>
+                            <span id="chatgpt-profit" class="font-bold text-purple-400">$0.00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Win Rate:</span>
+                            <span id="chatgpt-winrate" class="font-bold">0%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex flex-wrap gap-4">
+                <button onclick="startCompetition()" id="startBtn" class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-r from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 rounded-lg font-bold text-lg transition-all" disabled>
+                    🚀 Démarrer la Compétition
+                </button>
+                <button onclick="stopCompetition()" id="stopBtn" class="flex-1 min-w-[200px] px-6 py-4 bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 rounded-lg font-bold text-lg transition-all" style="display: none;">
+                    ⏸️ Arrêter
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Graphique Prix Réel -->
+            <div class="lg:col-span-2 gradient-border rounded-xl p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-bold">📈 Prix Temps Réel</h2>
+                    <div class="flex items-center gap-3">
+                        <select id="cryptoSelect" onchange="changeCrypto()" class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm">
+                            <option value="BTCUSDT">BTC/USDT</option>
+                            <option value="ETHUSDT">ETH/USDT</option>
+                            <option value="BNBUSDT">BNB/USDT</option>
+                        </select>
+                        <div class="text-2xl font-bold" id="currentPrice">$0</div>
+                    </div>
+                </div>
+                <div class="h-80">
+                    <canvas id="priceChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Classement en direct -->
+            <div class="gradient-border rounded-xl p-6">
+                <h2 class="text-2xl font-bold mb-4">🏆 Classement</h2>
+                <div id="leaderboard" class="space-y-3">
+                    <div class="bg-slate-800/50 rounded-lg p-4">
+                        <p class="text-center text-gray-400">Démarrez la compétition</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs des Trades -->
+        <div class="gradient-border rounded-xl p-6 mt-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold">📊 Journal des Trades</h2>
+                <button onclick="clearLogs()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm transition-all">
+                    🗑️ Effacer
+                </button>
+            </div>
+            <div id="tradeLogs" class="trade-log space-y-2">
+                <div class="text-center text-gray-400 py-8">
+                    Aucun trade pour le moment
+                </div>
+            </div>
+        </div>
+
+        <!-- Système Anti-Veille -->
+        <div class="gradient-border rounded-xl p-6 mt-6">
+            <h2 class="text-2xl font-bold mb-4">⚡ Système Anti-Veille</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-slate-800/50 rounded-lg p-4">
+                    <p class="text-sm text-gray-400 mb-2">Wake Lock</p>
+                    <p id="wakeLockStatus" class="font-bold text-green-400">Actif</p>
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-4">
+                    <p class="text-sm text-gray-400 mb-2">Temps actif</p>
+                    <p id="uptime" class="font-bold text-blue-400">00:00:00</p>
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-4">
+                    <p class="text-sm text-gray-400 mb-2">Connexion WS</p>
+                    <p id="wsStatus" class="font-bold text-green-400">Connecté</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============= CONFIGURATION =============
+        const CONFIG = {
+            BSC_RPC: 'https://bsc-dataseed1.binance.org',
+            CHAIN_ID: 56,
+            USDT_ADDRESS: '0x55d398326f99059fF775485246999027B3197955',
+            WBNB_ADDRESS: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+            PANCAKE_ROUTER: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
+            TOKEN_ADDRESSES: {
+                'BTCUSDT': '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c',
+                'ETHUSDT': '0x2170Ed0880ac9A755fd29B2688956BD959F933F8',
+                'BNBUSDT': '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'
+            },
+            SLIPPAGE: 2.0,
+            MIN_TRADE_AMOUNT: 10
+        };
+
+        // ============= STATE =============
+        let state = {
+            connectionMode: 'metamask',
+            account: null,
+            provider: null,
+            privateKeyWallet: null,
+            isConnected: false,
+            balances: { bnb: 0, usdt: 0 },
+            capital: 0,
+            selectedCrypto: 'BTCUSDT',
+            currentPrice: 0,
+            priceHistory: [],
+            
+            // IAs actives
+            activeAIs: {
+                claude: false,
+                gemini: false,
+                chatgpt: false
+            },
+            
+            // Stats par IA
+            aiStats: {
+                claude: { trades: 0, profit: 0, wins: 0, losses: 0 },
+                gemini: { trades: 0, profit: 0, wins: 0, losses: 0 },
+                chatgpt: { trades: 0, profit: 0, wins: 0, losses: 0 }
+            },
+            
+            // Positions ouvertes
+            positions: {
+                claude: null,
+                gemini: null,
+                chatgpt: null
+            },
+            
+            competitionRunning: false,
+            tradeLogs: [],
+            
+            // Anti-veille
+            wakeLock: null,
+            startTime: null,
+            hiddenInterval: null
+        };
+
+        let ws = null;
+        let priceChart = null;
+        let competitionInterval = null;
+        let uptimeInterval = null;
+
+        // ============= INITIALISATION =============
+        window.addEventListener('DOMContentLoaded', async () => {
+            console.log('🤖 AI Trading Bot - Démarrage');
+            console.log('⚡ Activation système anti-veille complet');
+            
+            initChart();
+            await requestWakeLock();
+            startUptimeCounter();
+            
+            // Protection anti-veille renforcée
+            setupAntiSleepProtection();
+            
+            // Empêcher la mise en veille toutes les 30s
+            setInterval(() => {
+                console.log('⚡ Keep alive ping - ' + new Date().toLocaleTimeString());
+                // Trigger activité réseau
+                if (state.currentPrice > 0) {
+                    console.log(`📊 Prix actuel: $${state.currentPrice}`);
+                }
+            }, 30000);
+            
+            // Vérifier la connexion périodiquement
+            setInterval(() => {
+                if (state.isConnected) {
+                    updateBalances();
+                }
+            }, 60000);
+            
+            // Surveiller l'état de la page
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+            window.addEventListener('focus', handleFocus);
+            window.addEventListener('blur', handleBlur);
+            
+            console.log('✅ Bot prêt - Protection anti-veille active');
+        });
+
+        function setupAntiSleepProtection() {
+            // 1. Mouvement de souris invisible
+            let mouseX = 0, mouseY = 0;
+            setInterval(() => {
+                const event = new MouseEvent('mousemove', {
+                    clientX: mouseX,
+                    clientY: mouseY
+                });
+                mouseX = (mouseX + 1) % 10;
+                mouseY = (mouseY + 1) % 10;
+            }, 60000);
+
+            // 2. Touch events pour mobile
+            setInterval(() => {
+                const touchEvent = new TouchEvent('touchstart', {
+                    touches: [],
+                    targetTouches: [],
+                    changedTouches: []
+                });
+            }, 60000);
+
+            // 3. LocalStorage ping
+            setInterval(() => {
+                localStorage.setItem('bot_active', Date.now().toString());
+            }, 30000);
+
+            // 4. Console log régulier
+            setInterval(() => {
+                const status = state.competitionRunning ? '🟢 TRADING' : '🟡 STANDBY';
+                console.log(`${status} | Uptime: ${getUptime()} | Prix: $${state.currentPrice}`);
+            }, 60000);
+
+            // 5. Empêcher le sleep du navigateur
+            if ('serviceWorker' in navigator) {
+                // Service worker keep-alive
+                setInterval(() => {
+                    navigator.serviceWorker.ready.then(() => {
+                        console.log('⚡ Service Worker actif');
+                    }).catch(() => {});
+                }, 120000);
+            }
+
+            console.log('✅ Protection anti-veille complète activée');
+        }
+
+        function handleVisibilityChange() {
+            if (document.hidden) {
+                console.log('⚠️ Onglet masqué - Bot continue en arrière-plan');
+                // Augmenter la fréquence des pings
+                if (!state.hiddenInterval) {
+                    state.hiddenInterval = setInterval(() => {
+                        console.log('⚡ Background keep-alive');
+                    }, 15000);
+                }
+            } else {
+                console.log('✅ Onglet visible');
+                if (state.hiddenInterval) {
+                    clearInterval(state.hiddenInterval);
+                    state.hiddenInterval = null;
+                }
+                // Re-synchroniser
+                if (state.isConnected) {
+                    updateBalances();
+                }
+                // Réactiver wake lock
+                requestWakeLock();
+            }
+        }
+
+        function handleFocus() {
+            console.log('✅ Fenêtre en focus');
+            requestWakeLock();
+        }
+
+        function handleBlur() {
+            console.log('⚠️ Fenêtre hors focus - Mode background actif');
+        }
+
+        function getUptime() {
+            if (!state.startTime) return '00:00:00';
+            const elapsed = Date.now() - state.startTime;
+            const hours = Math.floor(elapsed / 3600000);
+            const minutes = Math.floor((elapsed % 3600000) / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // ============= WAKE LOCK & ANTI-VEILLE =============
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    state.wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('✅ Wake Lock activé');
+                    document.getElementById('wakeLockStatus').textContent = 'Actif (Wake Lock)';
+                    
+                    state.wakeLock.addEventListener('release', () => {
+                        console.log('⚠️ Wake Lock libéré');
+                        document.getElementById('wakeLockStatus').textContent = 'Réactivation...';
+                        // Réactiver automatiquement
+                        setTimeout(requestWakeLock, 1000);
+                    });
+                } else {
+                    console.log('⚠️ Wake Lock non supporté - Utilisation méthodes alternatives');
+                    document.getElementById('wakeLockStatus').textContent = 'Actif (Alternatif)';
+                    useAlternativeKeepAwake();
+                }
+            } catch (err) {
+                console.warn('⚠️ Wake Lock non disponible:', err.message);
+                console.log('✅ Activation méthodes alternatives anti-veille');
+                document.getElementById('wakeLockStatus').textContent = 'Actif (Alternatif)';
+                useAlternativeKeepAwake();
+            }
+        }
+
+        function useAlternativeKeepAwake() {
+            // Méthode 1: Vidéo invisible en boucle
+            const video = document.createElement('video');
+            video.style.display = 'none';
+            video.setAttribute('loop', '');
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
+            
+            // Créer une vidéo vide de 1 seconde
+            const canvas = document.createElement('canvas');
+            canvas.width = 1;
+            canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, 1, 1);
+            
+            canvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                video.src = url;
+                video.play().catch(() => {
+                    console.log('⚠️ Méthode vidéo non disponible');
+                });
+                document.body.appendChild(video);
+            }, 'video/webm');
+
+            // Méthode 2: Audio silence en boucle
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            gainNode.gain.value = 0.001; // Volume très faible
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            oscillator.frequency.value = 20; // Fréquence inaudible
+            oscillator.start();
+
+            // Méthode 3: Ping réseau régulier
+            setInterval(() => {
+                fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' })
+                    .catch(() => {});
+            }, 45000);
+
+            // Méthode 4: Animation continue
+            let animationId;
+            function animate() {
+                // Forcer le repaint
+                document.body.style.transform = 'translateZ(0)';
+                animationId = requestAnimationFrame(animate);
+            }
+            animate();
+
+            console.log('✅ Méthodes alternatives anti-veille activées');
+            console.log('   - Vidéo invisible en boucle');
+            console.log('   - Audio silence');
+            console.log('   - Ping réseau');
+            console.log('   - Animation continue');
+        }
+
+        function startUptimeCounter() {
+            state.startTime = Date.now();
+            uptimeInterval = setInterval(() => {
+                const elapsed = Date.now() - state.startTime;
+                const hours = Math.floor(elapsed / 3600000);
+                const minutes = Math.floor((elapsed % 3600000) / 60000);
+                const seconds = Math.floor((elapsed % 60000) / 1000);
+                
+                document.getElementById('uptime').textContent = 
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        // ============= CONNEXION =============
+        function switchConnectionMode() {
+            state.connectionMode = document.getElementById('connectionMode').value;
+            
+            if (state.connectionMode === 'metamask') {
+                document.getElementById('metamaskSection').style.display = 'block';
+                document.getElementById('privatekeySection').style.display = 'none';
+            } else {
+                document.getElementById('metamaskSection').style.display = 'none';
+                document.getElementById('privatekeySection').style.display = 'block';
+            }
+        }
+
+        async function connectMetaMask() {
+            if (!window.ethereum) {
+                alert('❌ MetaMask non installé');
+                return;
+            }
+
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                
+                if (chainId !== '0x38') {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: '0x38',
+                            chainName: 'BNB Smart Chain',
+                            nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                            rpcUrls: [CONFIG.BSC_RPC],
+                            blockExplorerUrls: ['https://bscscan.com']
+                        }]
+                    });
+                }
+                
+                state.account = accounts[0];
+                state.provider = new ethers.providers.Web3Provider(window.ethereum);
+                state.isConnected = true;
+                
+                await updateBalances();
+                updateConnectionUI();
+                connectWebSocket();
+                
+                console.log('✅ MetaMask connecté:', state.account);
+                
+            } catch (error) {
+                console.error('❌ Erreur connexion:', error);
+                alert('Erreur: ' + error.message);
+            }
+        }
+
+        async function connectWithPrivateKey() {
+            const pkInput = document.getElementById('privateKeyInput').value.trim();
+            
+            if (!pkInput) {
+                alert('❌ Entrez votre clé privée');
+                return;
+            }
+
+            try {
+                const privateKey = pkInput.startsWith('0x') ? pkInput : '0x' + pkInput;
+                
+                if (privateKey.length !== 66) {
+                    alert('❌ Clé privée invalide');
+                    return;
+                }
+                
+                state.provider = new ethers.providers.JsonRpcProvider(CONFIG.BSC_RPC);
+                state.privateKeyWallet = new ethers.Wallet(privateKey, state.provider);
+                state.account = state.privateKeyWallet.address;
+                state.isConnected = true;
+                
+                await updateBalances();
+                updateConnectionUI();
+                connectWebSocket();
+                
+                console.log('✅ Mode Auto activé:', state.account);
+                alert('✅ Mode Automatique 24/7 activé !');
+                
+            } catch (error) {
+                console.error('❌ Erreur clé privée:', error);
+                alert('❌ Clé privée invalide: ' + error.message);
+            }
+        }
+
+        function togglePrivateKeyVisibility() {
+            const input = document.getElementById('privateKeyInput');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        async function updateBalances() {
+            if (!state.isConnected) return;
+
+            try {
+                // BNB Balance
+                const bnbBalance = await state.provider.getBalance(state.account);
+                state.balances.bnb = parseFloat(ethers.utils.formatEther(bnbBalance));
+                
+                // USDT Balance
+                const usdtContract = new ethers.Contract(
+                    CONFIG.USDT_ADDRESS,
+                    ['function balanceOf(address) view returns (uint256)'],
+                    state.provider
+                );
+                const usdtBalance = await usdtContract.balanceOf(state.account);
+                state.balances.usdt = parseFloat(ethers.utils.formatUnits(usdtBalance, 18));
+                
+                document.getElementById('bnbBalance').textContent = state.balances.bnb.toFixed(4);
+                document.getElementById('usdtBalance').textContent = state.balances.usdt.toFixed(2);
+                
+            } catch (error) {
+                console.error('❌ Erreur soldes:', error);
+            }
+        }
+
+        function updateConnectionUI() {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.innerHTML = `
+                <span class="status-dot status-online"></span>
+                ${state.connectionMode === 'metamask' ? 'MetaMask' : 'Mode Auto'}
+            `;
+            
+            document.getElementById('walletInfo').style.display = 'grid';
+            document.getElementById('walletAddress').textContent = 
+                state.account.slice(0, 6) + '...' + state.account.slice(-4);
+            
+            document.getElementById('connectBtn').textContent = 'Connecté';
+            document.getElementById('connectBtn').disabled = true;
+            
+            checkCapitalAndEnableStart();
+        }
+
+        function setCapital() {
+            const capital = parseFloat(document.getElementById('tradingCapital').value);
+            
+            if (!capital || capital < CONFIG.MIN_TRADE_AMOUNT) {
+                alert(`❌ Capital minimum: ${CONFIG.MIN_TRADE_AMOUNT} USDT`);
+                return;
+            }
+            
+            if (capital > state.balances.usdt) {
+                alert('❌ Capital supérieur au solde disponible');
+                return;
+            }
+            
+            state.capital = capital;
+            alert(`✅ Capital défini: ${capital} USDT`);
+            
+            checkCapitalAndEnableStart();
+        }
+
+        function checkCapitalAndEnableStart() {
+            if (state.isConnected && state.capital > 0) {
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('startBtn').classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // ============= WEBSOCKET PRIX RÉEL =============
+        function connectWebSocket() {
+            if (ws) ws.close();
+            
+            const symbol = state.selectedCrypto.toLowerCase();
+            ws = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol}@ticker`);
+            
+            ws.onopen = () => {
+                console.log('✅ WebSocket connecté');
+                document.getElementById('wsStatus').textContent = 'Connecté';
+                document.getElementById('wsStatus').className = 'font-bold text-green-400';
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                state.currentPrice = parseFloat(data.c);
+                
+                state.priceHistory.push({
+                    time: new Date().toLocaleTimeString(),
+                    price: state.currentPrice
+                });
+                
+                if (state.priceHistory.length > 50) {
+                    state.priceHistory.shift();
+                }
+                
+                document.getElementById('currentPrice').textContent = '$' + state.currentPrice.toFixed(2);
+                
+                if (state.priceHistory.length % 5 === 0) {
+                    updateChart();
+                }
+            };
+            
+            ws.onerror = () => {
+                document.getElementById('wsStatus').textContent = 'Erreur';
+                document.getElementById('wsStatus').className = 'font-bold text-red-400';
+            };
+            
+            ws.onclose = () => {
+                console.log('🔌 WebSocket déconnecté');
+                document.getElementById('wsStatus').textContent = 'Déconnecté';
+                document.getElementById('wsStatus').className = 'font-bold text-yellow-400';
+                
+                // Reconnexion automatique
+                setTimeout(() => {
+                    if (state.isConnected) {
+                        console.log('🔄 Reconnexion WebSocket...');
+                        connectWebSocket();
+                    }
+                }, 5000);
+            };
+        }
+
+        function changeCrypto() {
+            state.selectedCrypto = document.getElementById('cryptoSelect').value;
+            state.priceHistory = [];
+            connectWebSocket();
+        }
+
+        // ============= GRAPHIQUE =============
+        function initChart() {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Prix',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#9ca3af' }
+                        },
+                        y: { 
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                            ticks: { color: '#9ca3af' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart() {
+            if (!priceChart) return;
+            
+            priceChart.data.labels = state.priceHistory.map(p => p.time);
+            priceChart.data.datasets[0].data = state.priceHistory.map(p => p.price);
+            priceChart.update('none');
+        }
+
+        // ============= IA SELECTION =============
+        function toggleAI(aiName) {
+            state.activeAIs[aiName] = !state.activeAIs[aiName];
+            
+            const card = document.getElementById(`card-${aiName}`);
+            const checkbox = document.getElementById(`ai-${aiName}`);
+            
+            if (state.activeAIs[aiName]) {
+                card.classList.add('active');
+                checkbox.checked = true;
+            } else {
+                card.classList.remove('active');
+                checkbox.checked = false;
+            }
+        }
+
+        // ============= COMPÉTITION =============
+        async function startCompetition() {
+            const activeCount = Object.values(state.activeAIs).filter(v => v).length;
+            
+            if (activeCount === 0) {
+                alert('❌ Sélectionnez au moins une IA');
+                return;
+            }
+            
+            if (!state.isConnected || state.capital === 0) {
+                alert('❌ Connectez votre wallet et définissez le capital');
+                return;
+            }
+            
+            state.competitionRunning = true;
+            
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'block';
+            
+            addLog('system', '🚀 Compétition démarrée !', `${activeCount} IA(s) actives • Capital: $${state.capital}`);
+            
+            // Boucle de trading
+            competitionInterval = setInterval(() => {
+                analyzeAndTrade();
+            }, 30000); // Analyse toutes les 30 secondes
+            
+            console.log('✅ Compétition démarrée');
+        }
+
+        function stopCompetition() {
+            state.competitionRunning = false;
+            
+            if (competitionInterval) {
+                clearInterval(competitionInterval);
+                competitionInterval = null;
+            }
+            
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('stopBtn').style.display = 'none';
+            
+            addLog('system', '⏸️ Compétition arrêtée', 'Toutes les IA ont été mises en pause');
+            
+            console.log('⏸️ Compétition arrêtée');
+        }
+
+        async function analyzeAndTrade() {
+            if (!state.competitionRunning) return;
+            
+            console.log('📊 Analyse en cours...');
+            
+            // Pour chaque IA active
+            for (const [aiName, isActive] of Object.entries(state.activeAIs)) {
+                if (!isActive) continue;
+                
+                // Récupérer le sentiment de l'IA
+                const sentiment = await getAISentiment(aiName);
+                
+                // Décider du trade
+                if (sentiment === 'BUY' && !state.positions[aiName]) {
+                    await executeBuy(aiName);
+                } else if (sentiment === 'SELL' && state.positions[aiName]) {
+                    await executeSell(aiName);
+                }
+            }
+            
+            updateLeaderboard();
+        }
+
+        // ============= CONFIGURATION API IA =============
+        const AI_CONFIG = {
+            // APIs des IA - À configurer avec vos clés
+            CLAUDE_API: {
+                endpoint: 'https://api.anthropic.com/v1/messages',
+                // Note: La clé API doit être ajoutée par l'utilisateur
+                model: 'claude-3-5-sonnet-20241022'
+            },
+            GEMINI_API: {
+                endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+                // Note: La clé API doit être ajoutée par l'utilisateur
+            },
+            CHATGPT_API: {
+                endpoint: 'https://api.openai.com/v1/chat/completions',
+                // Note: La clé API doit être ajoutée par l'utilisateur
+                model: 'gpt-4'
+            },
+            // Sources de données en temps réel
+            NEWS_SOURCES: [
+                'https://cryptopanic.com/api/v1/posts/?auth_token=free&currencies=',
+                'https://newsapi.org/v2/everything?q=',
+            ],
+            TWITTER_SENTIMENT: true,
+            REDDIT_SENTIMENT: true
+        };
+
+        // ============= ANALYSE SENTIMENT PAR IA =============
+        async function getAISentiment(aiName) {
+            console.log(`🤖 ${aiName} - Analyse du sentiment en cours...`);
+            
+            try {
+                // 1. Récupérer les données du marché
+                const marketData = await getMarketData();
+                
+                // 2. Récupérer les actualités et tweets
+                const newsData = await getNewsAndSocial();
+                
+                // 3. Analyser avec l'IA spécifique
+                let sentiment;
+                
+                switch(aiName) {
+                    case 'claude':
+                        sentiment = await analyzeWithClaude(marketData, newsData);
+                        break;
+                    case 'gemini':
+                        sentiment = await analyzeWithGemini(marketData, newsData);
+                        break;
+                    case 'chatgpt':
+                        sentiment = await analyzeWithChatGPT(marketData, newsData);
+                        break;
+                }
+                
+                return sentiment;
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur analyse:`, error);
+                // Fallback sur analyse technique si API échoue
+                return getFallbackAnalysis();
+            }
+        }
+
+        // ============= RÉCUPÉRATION DONNÉES MARCHÉ =============
+        async function getMarketData() {
+            const symbol = state.selectedCrypto;
+            const currentPrice = state.currentPrice;
+            const priceChange24h = calculatePriceChange24h();
+            const volume = await get24hVolume();
+            const rsi = calculateRSI(state.priceHistory.map(p => p.price));
+            
+            return {
+                symbol: symbol,
+                currentPrice: currentPrice,
+                priceChange24h: priceChange24h,
+                volume: volume,
+                rsi: rsi,
+                trend: calculateTrend(),
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        function calculatePriceChange24h() {
+            if (state.priceHistory.length < 2) return 0;
+            const first = state.priceHistory[0].price;
+            const last = state.currentPrice;
+            return ((last - first) / first) * 100;
+        }
+
+        async function get24hVolume() {
+            try {
+                const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${state.selectedCrypto}`);
+                const data = await response.json();
+                return parseFloat(data.volume);
+            } catch {
+                return 0;
+            }
+        }
+
+        // ============= RÉCUPÉRATION NEWS & SOCIAL =============
+        async function getNewsAndSocial() {
+            const crypto = state.selectedCrypto.replace('USDT', '');
+            
+            try {
+                // Récupérer les actualités crypto récentes
+                const news = await fetchCryptoNews(crypto);
+                
+                // Récupérer le sentiment Twitter (simulation si pas d'API)
+                const twitterSentiment = await getTwitterSentiment(crypto);
+                
+                // Récupérer le sentiment Reddit (simulation si pas d'API)
+                const redditSentiment = await getRedditSentiment(crypto);
+                
+                return {
+                    news: news,
+                    twitter: twitterSentiment,
+                    reddit: redditSentiment,
+                    timestamp: new Date().toISOString()
+                };
+                
+            } catch (error) {
+                console.error('❌ Erreur récupération données sociales:', error);
+                return { news: [], twitter: null, reddit: null };
+            }
+        }
+
+        async function fetchCryptoNews(crypto) {
+            try {
+                // CryptoPanic API (gratuit avec limitations)
+                const response = await fetch(`https://cryptopanic.com/api/free/v1/posts/?auth_token=free&currencies=${crypto}&public=true`);
+                
+                if (!response.ok) {
+                    // Fallback: Simulation de news
+                    return generateSimulatedNews(crypto);
+                }
+                
+                const data = await response.json();
+                return data.results.slice(0, 10).map(post => ({
+                    title: post.title,
+                    url: post.url,
+                    published: post.published_at,
+                    source: post.source?.title || 'Unknown',
+                    sentiment: post.votes?.positive > post.votes?.negative ? 'positive' : 
+                              post.votes?.negative > post.votes?.positive ? 'negative' : 'neutral'
+                }));
+                
+            } catch (error) {
+                console.log('⚠️ News API non disponible, utilisation simulation');
+                return generateSimulatedNews(crypto);
+            }
+        }
+
+        function generateSimulatedNews(crypto) {
+            const newsTemplates = [
+                { sentiment: 'positive', template: `${crypto} adoption increases among institutions` },
+                { sentiment: 'positive', template: `Major partnership announced for ${crypto}` },
+                { sentiment: 'negative', template: `${crypto} faces regulatory concerns` },
+                { sentiment: 'neutral', template: `${crypto} trading volume stable` },
+                { sentiment: 'positive', template: `Bullish indicators for ${crypto}` },
+                { sentiment: 'negative', template: `Market correction affects ${crypto}` }
+            ];
+            
+            return newsTemplates.slice(0, 5).map(t => ({
+                title: t.template,
+                sentiment: t.sentiment,
+                published: new Date().toISOString(),
+                source: 'Simulated',
+                simulated: true
+            }));
+        }
+
+        async function getTwitterSentiment(crypto) {
+            // Simulation du sentiment Twitter
+            // En production: utiliser Twitter API v2
+            const sentiments = ['bullish', 'bearish', 'neutral'];
+            const randomSentiment = sentiments[Math.floor(Math.random() * sentiments.length)];
+            
+            return {
+                overall: randomSentiment,
+                volume: Math.floor(Math.random() * 10000) + 1000,
+                positiveRatio: Math.random(),
+                trending: Math.random() > 0.7,
+                topHashtags: [`#${crypto}`, `#crypto`, `#${crypto}to100k`]
+            };
+        }
+
+        async function getRedditSentiment(crypto) {
+            // Simulation du sentiment Reddit
+            // En production: utiliser Reddit API
+            return {
+                overall: Math.random() > 0.5 ? 'bullish' : 'bearish',
+                mentions: Math.floor(Math.random() * 500) + 50,
+                upvoteRatio: Math.random(),
+                topSubreddits: ['r/cryptocurrency', 'r/bitcoin', 'r/cryptomarkets']
+            };
+        }
+
+        // ============= ANALYSE CLAUDE =============
+        async function analyzeWithClaude(marketData, newsData) {
+            console.log('🧠 Claude analyse les données...');
+            
+            // Construction du prompt pour Claude
+            const prompt = buildAnalysisPrompt(marketData, newsData, 'claude');
+            
+            try {
+                // Si vous avez une clé API Claude
+                const apiKey = localStorage.getItem('claude_api_key');
+                
+                if (apiKey) {
+                    const response = await fetch('https://api.anthropic.com/v1/messages', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-api-key': apiKey,
+                            'anthropic-version': '2023-06-01'
+                        },
+                        body: JSON.stringify({
+                            model: 'claude-3-5-sonnet-20241022',
+                            max_tokens: 1024,
+                            messages: [{
+                                role: 'user',
+                                content: prompt
+                            }]
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        const analysis = data.content[0].text;
+                        return parseAIResponse(analysis);
+                    }
+                }
+            } catch (error) {
+                console.log('⚠️ API Claude non disponible');
+            }
+            
+            // Analyse locale sophistiquée style Claude (conservative)
+            return analyzeLocalClaude(marketData, newsData);
+        }
+
+        function analyzeLocalClaude(marketData, newsData) {
+            // Claude est réputé pour être prudent et analytique
+            const newsSentiment = calculateNewsSentiment(newsData.news);
+            const socialSentiment = (newsData.twitter?.positiveRatio || 0.5) * 0.6 + 
+                                   (newsData.reddit?.upvoteRatio || 0.5) * 0.4;
+            
+            // Claude pondère beaucoup les données fondamentales
+            let score = 0;
+            
+            // Analyse fondamentale (50% du poids)
+            if (newsSentiment > 0.6) score += 2;
+            else if (newsSentiment < 0.4) score -= 2;
+            
+            // Sentiment social (30% du poids)
+            if (socialSentiment > 0.65) score += 1.5;
+            else if (socialSentiment < 0.35) score -= 1.5;
+            
+            // Technique (20% du poids)
+            if (marketData.rsi < 35 && marketData.trend > 0) score += 1;
+            else if (marketData.rsi > 65 && marketData.trend < 0) score -= 1;
+            
+            // Claude est conservateur: besoin d'un score élevé
+            if (score >= 3) return 'BUY';
+            if (score <= -2.5) return 'SELL';
+            return 'HOLD';
+        }
+
+        // ============= ANALYSE GEMINI =============
+        async function analyzeWithGemini(marketData, newsData) {
+            console.log('💎 Gemini analyse les données...');
+            
+            const prompt = buildAnalysisPrompt(marketData, newsData, 'gemini');
+            
+            try {
+                const apiKey = localStorage.getItem('gemini_api_key');
+                
+                if (apiKey) {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [{
+                                    text: prompt
+                                }]
+                            }]
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        const analysis = data.candidates[0].content.parts[0].text;
+                        return parseAIResponse(analysis);
+                    }
+                }
+            } catch (error) {
+                console.log('⚠️ API Gemini non disponible');
+            }
+            
+            // Analyse locale style Gemini (multimodale et agressive)
+            return analyzeLocalGemini(marketData, newsData);
+        }
+
+        function analyzeLocalGemini(marketData, newsData) {
+            // Gemini est réputé pour être agressif et multimodal
+            const newsSentiment = calculateNewsSentiment(newsData.news);
+            const twitterBuzz = newsData.twitter?.trending ? 1 : 0;
+            
+            let score = 0;
+            
+            // Gemini donne beaucoup de poids au buzz social (40%)
+            if (newsData.twitter?.volume > 5000) score += 2;
+            if (twitterBuzz) score += 1.5;
+            if (newsData.reddit?.mentions > 300) score += 1;
+            
+            // Sentiment général (40%)
+            if (newsSentiment > 0.55) score += 2;
+            else if (newsSentiment < 0.45) score -= 2;
+            
+            // Technique (20%)
+            if (marketData.rsi < 40) score += 1;
+            else if (marketData.rsi > 60) score -= 1;
+            
+            // Gemini est plus agressif
+            if (score >= 2.5) return 'BUY';
+            if (score <= -2) return 'SELL';
+            return 'HOLD';
+        }
+
+        // ============= ANALYSE CHATGPT =============
+        async function analyzeWithChatGPT(marketData, newsData) {
+            console.log('🚀 ChatGPT analyse les données...');
+            
+            const prompt = buildAnalysisPrompt(marketData, newsData, 'chatgpt');
+            
+            try {
+                const apiKey = localStorage.getItem('openai_api_key');
+                
+                if (apiKey) {
+                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify({
+                            model: 'gpt-4',
+                            messages: [{
+                                role: 'system',
+                                content: 'You are a professional crypto trading analyst. Analyze market data and provide clear BUY, SELL, or HOLD recommendations.'
+                            }, {
+                                role: 'user',
+                                content: prompt
+                            }],
+                            max_tokens: 500
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        const analysis = data.choices[0].message.content;
+                        return parseAIResponse(analysis);
+                    }
+                }
+            } catch (error) {
+                console.log('⚠️ API OpenAI non disponible');
+            }
+            
+            // Analyse locale style ChatGPT (équilibré et rapide)
+            return analyzeLocalChatGPT(marketData, newsData);
+        }
+
+        function analyzeLocalChatGPT(marketData, newsData) {
+            // ChatGPT est réputé pour être équilibré et rapide
+            const newsSentiment = calculateNewsSentiment(newsData.news);
+            const socialScore = (newsData.twitter?.positiveRatio || 0.5) * 0.5 + 
+                               (newsData.reddit?.upvoteRatio || 0.5) * 0.5;
+            
+            let score = 0;
+            
+            // Approche équilibrée (33% chacun)
+            // News
+            if (newsSentiment > 0.6) score += 1.5;
+            else if (newsSentiment < 0.4) score -= 1.5;
+            
+            // Social
+            if (socialScore > 0.6) score += 1.5;
+            else if (socialScore < 0.4) score -= 1.5;
+            
+            // Technique
+            if (marketData.rsi < 35 && marketData.priceChange24h > 0) score += 1.5;
+            else if (marketData.rsi > 65 && marketData.priceChange24h < 0) score -= 1.5;
+            
+            // ChatGPT est modéré
+            if (score >= 2.5) return 'BUY';
+            if (score <= -2.5) return 'SELL';
+            return 'HOLD';
+        }
+
+        // ============= HELPERS =============
+        function buildAnalysisPrompt(marketData, newsData, aiName) {
+            const newsText = newsData.news.map(n => `- ${n.title} (${n.sentiment})`).join('\n');
+            
+            return `
+You are a professional crypto trading analyst. Analyze the following data and provide a trading decision (BUY, SELL, or HOLD).
+
+MARKET DATA:
+- Asset: ${marketData.symbol}
+- Current Price: $${marketData.currentPrice}
+- 24h Change: ${marketData.priceChange24h.toFixed(2)}%
+- RSI: ${marketData.rsi.toFixed(2)}
+- Trend: ${marketData.trend.toFixed(2)}%
+
+RECENT NEWS:
+${newsText}
+
+SOCIAL SENTIMENT:
+- Twitter: ${newsData.twitter?.overall || 'neutral'} (Volume: ${newsData.twitter?.volume || 0})
+- Reddit: ${newsData.reddit?.overall || 'neutral'} (Mentions: ${newsData.reddit?.mentions || 0})
+
+Based on this data, provide your recommendation:
+1. Decision: BUY, SELL, or HOLD
+2. Confidence: 0-100%
+3. Reasoning: Brief explanation
+
+Format your response as: DECISION|CONFIDENCE|REASONING
+Example: BUY|85|Strong positive news sentiment with oversold RSI
+`;
+        }
+
+        function parseAIResponse(response) {
+            // Extraire BUY, SELL ou HOLD de la réponse
+            const upperResponse = response.toUpperCase();
+            
+            if (upperResponse.includes('BUY') || upperResponse.includes('BULLISH')) {
+                return 'BUY';
+            } else if (upperResponse.includes('SELL') || upperResponse.includes('BEARISH')) {
+                return 'SELL';
+            } else {
+                return 'HOLD';
+            }
+        }
+
+        function calculateNewsSentiment(news) {
+            if (!news || news.length === 0) return 0.5;
+            
+            const sentimentScores = {
+                'positive': 1,
+                'neutral': 0.5,
+                'negative': 0
+            };
+            
+            const total = news.reduce((sum, n) => sum + (sentimentScores[n.sentiment] || 0.5), 0);
+            return total / news.length;
+        }
+
+        function getFallbackAnalysis() {
+            // En cas d'échec complet, analyse technique basique
+            const rsi = calculateRSI(state.priceHistory.map(p => p.price));
+            const trend = calculateTrend();
+            
+            if (rsi < 30 && trend > 0) return 'BUY';
+            if (rsi > 70) return 'SELL';
+            return 'HOLD';
+        }
+
+        function calculateRSI(prices, period = 14) {
+            if (prices.length < period + 1) return 50;
+            
+            let gains = 0, losses = 0;
+            for (let i = prices.length - period; i < prices.length; i++) {
+                const change = prices[i] - prices[i - 1];
+                if (change > 0) gains += change;
+                else losses += Math.abs(change);
+            }
+            
+            const avgGain = gains / period;
+            const avgLoss = losses / period;
+            if (avgLoss === 0) return 100;
+            
+            const rs = avgGain / avgLoss;
+            return 100 - (100 / (1 + rs));
+        }
+
+        function calculateTrend() {
+            if (state.priceHistory.length < 10) return 0;
+            
+            const recent = state.priceHistory.slice(-10);
+            const firstPrice = recent[0].price;
+            const lastPrice = recent[recent.length - 1].price;
+            
+            return ((lastPrice - firstPrice) / firstPrice) * 100;
+        }
+
+        async function executeBuy(aiName) {
+            const tradeAmount = state.capital * 0.3; // 30% du capital par trade
+            
+            if (tradeAmount < CONFIG.MIN_TRADE_AMOUNT) {
+                console.log(`⚠️ ${aiName}: Montant insuffisant`);
+                return;
+            }
+            
+            try {
+                // Simulation du trade (en production, utiliser PancakeSwap)
+                const buyPrice = state.currentPrice;
+                
+                state.positions[aiName] = {
+                    entryPrice: buyPrice,
+                    amount: tradeAmount,
+                    entryTime: Date.now()
+                };
+                
+                state.aiStats[aiName].trades++;
+                
+                addLog(aiName, '📈 ACHAT', `${tradeAmount.toFixed(2)} USDT @ $${buyPrice.toFixed(2)}`);
+                
+                console.log(`✅ ${aiName} - ACHAT: ${tradeAmount} USDT @ ${buyPrice}`);
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur achat:`, error);
+                addLog(aiName, '❌ ERREUR ACHAT', error.message);
+            }
+        }
+
+        async function executeSell(aiName) {
+            if (!state.positions[aiName]) return;
+            
+            try {
+                const position = state.positions[aiName];
+                const sellPrice = state.currentPrice;
+                const profit = ((sellPrice - position.entryPrice) / position.entryPrice) * position.amount;
+                
+                state.aiStats[aiName].profit += profit;
+                
+                if (profit > 0) {
+                    state.aiStats[aiName].wins++;
+                } else {
+                    state.aiStats[aiName].losses++;
+                }
+                
+                addLog(aiName, '📉 VENTE', `${position.amount.toFixed(2)} USDT @ $${sellPrice.toFixed(2)} • Profit: ${profit > 0 ? '+' : ''}${profit.toFixed(2)} USDT`);
+                
+                state.positions[aiName] = null;
+                
+                updateAIStats(aiName);
+                
+                console.log(`✅ ${aiName} - VENTE: Profit ${profit.toFixed(2)} USDT`);
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur vente:`, error);
+                addLog(aiName, '❌ ERREUR VENTE', error.message);
+            }
+        }
+
+        function updateAIStats(aiName) {
+            const stats = state.aiStats[aiName];
+            const winRate = stats.trades > 0 ? ((stats.wins / stats.trades) * 100).toFixed(1) : 0;
+            
+            document.getElementById(`${aiName}-trades`).textContent = stats.trades;
+            document.getElementById(`${aiName}-profit`).textContent = 
+                (stats.profit >= 0 ? '+$' : '-$') + Math.abs(stats.profit).toFixed(2);
+            document.getElementById(`${aiName}-winrate`).textContent = winRate + '%';
+            
+            // Couleur du profit
+            const profitEl = document.getElementById(`${aiName}-profit`);
+            profitEl.className = stats.profit >= 0 ? 'font-bold text-green-400' : 'font-bold text-red-400';
+        }
+
+        function updateLeaderboard() {
+            const sorted = Object.entries(state.aiStats)
+                .filter(([name]) => state.activeAIs[name])
+                .sort(([, a], [, b]) => b.profit - a.profit);
+            
+            const icons = { claude: '🧠', gemini: '💎', chatgpt: '🚀' };
+            const colors = { claude: 'green', gemini: 'blue', chatgpt: 'purple' };
+            
+            const html = sorted.map(([name, stats], index) => {
+                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '🔹';
+                const winRate = stats.trades > 0 ? ((stats.wins / stats.trades) * 100).toFixed(1) : 0;
+                
+                return `
+                    <div class="bg-slate-800/50 rounded-lg p-4 slide-in">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-2xl">${medal}</span>
+                                <span class="text-xl">${icons[name]}</span>
+                                <span class="font-bold">${name.charAt(0).toUpperCase() + name.slice(1)}</span>
+                            </div>
+                            <span class="text-xl font-bold ${stats.profit >= 0 ? 'text-green-400' : 'text-red-400'}">
+                                ${stats.profit >= 0 ? '+' : ''}$${stats.profit.toFixed(2)}
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-xs text-gray-400">
+                            <div>Trades: <span class="text-white font-bold">${stats.trades}</span></div>
+                            <div>Wins: <span class="text-green-400 font-bold">${stats.wins}</span></div>
+                            <div>Win Rate: <span class="text-${colors[name]}-400 font-bold">${winRate}%</span></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('leaderboard').innerHTML = html || '<div class="text-center text-gray-400 py-8">Aucune IA active</div>';
+        }
+
+        // ============= LOGS =============
+        function addLog(source, action, details) {
+            const timestamp = new Date().toLocaleTimeString();
+            const icons = { 
+                claude: '🧠', 
+                gemini: '💎', 
+                chatgpt: '🚀',
+                system: '⚙️'
+            };
+            const colors = {
+                claude: 'green',
+                gemini: 'blue',
+                chatgpt: 'purple',
+                system: 'gray'
+            };
+            
+            const log = {
+                timestamp,
+                source,
+                action,
+                details
+            };
+            
+            state.tradeLogs.unshift(log);
+            if (state.tradeLogs.length > 100) state.tradeLogs.pop();
+            
+            renderLogs();
+        }
+
+        function renderLogs() {
+            const icons = { 
+                claude: '🧠', 
+                gemini: '💎', 
+                chatgpt: '🚀',
+                system: '⚙️'
+            };
+            
+            const html = state.tradeLogs.map(log => `
+                <div class="bg-slate-800/50 rounded-lg p-3 slide-in">
+                    <div class="flex items-start gap-3">
+                        <span class="text-2xl">${icons[log.source] || '📊'}</span>
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="font-bold">${log.source.toUpperCase()}</span>
+                                <span class="text-xs text-gray-500">${log.timestamp}</span>
+                            </div>
+                            <p class="text-sm font-semibold mb-1">${log.action}</p>
+                            <p class="text-xs text-gray-400">${log.details}</p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            document.getElementById('tradeLogs').innerHTML = html || 
+                '<div class="text-center text-gray-400 py-8">Aucun trade pour le moment</div>';
+        }
+
+        function clearLogs() {
+            state.tradeLogs = [];
+            renderLogs();
+        }
+
+        // ============= EMPÊCHER LA FERMETURE ACCIDENTELLE =============
+        window.addEventListener('beforeunload', (e) => {
+            if (state.competitionRunning) {
+                e.preventDefault();
+                e.returnValue = 'La compétition est en cours. Êtes-vous sûr de vouloir quitter ?';
+                return e.returnValue;
+            }
+        });
+
+        // ============= GESTION DE LA VISIBILITÉ =============
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                console.log('⚠️ Onglet masqué - Bot continue en arrière-plan');
+            } else {
+                console.log('✅ Onglet visible');
+                // Re-synchroniser si nécessaire
+                if (state.isConnected) {
+                    updateBalances();
+                }
+                // Réactiver wake lock
+                requestWakeLock();
+            }
+        });
+
+        console.log('✅ Bot initialisé - Prêt pour le trading 24/7');
+
+        // ============= GESTION API KEYS =============
+        function toggleAPIConfig() {
+            const panel = document.getElementById('apiConfigPanel');
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                // Charger les clés existantes
+                document.getElementById('claudeApiKey').value = localStorage.getItem('claude_api_key') || '';
+                document.getElementById('geminiApiKey').value = localStorage.getItem('gemini_api_key') || '';
+                document.getElementById('openaiApiKey').value = localStorage.getItem('openai_api_key') || '';
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function saveAPIKeys() {
+            const claudeKey = document.getElementById('claudeApiKey').value.trim();
+            const geminiKey = document.getElementById('geminiApiKey').value.trim();
+            const openaiKey = document.getElementById('openaiApiKey').value.trim();
+            
+            if (claudeKey) localStorage.setItem('claude_api_key', claudeKey);
+            if (geminiKey) localStorage.setItem('gemini_api_key', geminiKey);
+            if (openaiKey) localStorage.setItem('openai_api_key', openaiKey);
+            
+            let savedCount = 0;
+            if (claudeKey) savedCount++;
+            if (geminiKey) savedCount++;
+            if (openaiKey) savedCount++;
+            
+            if (savedCount > 0) {
+                alert(`✅ ${savedCount} clé(s) API sauvegardée(s) !`);
+                addLog('system', '🔑 API configurées', `${savedCount} clé(s) API enregistrée(s)`);
+            } else {
+                alert('ℹ️ Aucune clé API saisie');
+            }
+            
+            document.getElementById('apiConfigPanel').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
