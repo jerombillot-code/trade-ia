@@ -207,6 +207,38 @@
                     </button>
                 </div>
             </div>
+
+            <div class="mt-4">
+                <label class="block text-sm text-gray-300 mb-2">Slippage tolérance (%)</label>
+                <div class="flex gap-3">
+                    <input type="number" id="slippageInput" value="2" min="0.5" max="10" step="0.5" class="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-4 py-3 focus:outline-none focus:border-yellow-400">
+                    <button onclick="updateSlippage()" class="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 rounded-lg font-bold transition-all">
+                        Appliquer
+                    </button>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">⚠️ Recommandé: 2-5% pour tokens volatils</p>
+            </div>
+
+            <!-- Avertissement Trading Réel -->
+            <div class="mt-4 bg-gradient-to-r from-blue-900/30 to-cyan-900/30 border-2 border-cyan-500 rounded-lg p-4">
+                <p class="text-cyan-300 font-bold mb-2 flex items-center gap-2">
+                    <span class="text-2xl">🌊</span>
+                    TRADING RÉEL via OpenOcean
+                </p>
+                <ul class="text-sm text-cyan-200 space-y-1">
+                    <li>✓ Meilleurs prix sur 15+ DEX (PancakeSwap, Biswap, ApeSwap, DODO...)</li>
+                    <li>✓ Agrégateur intelligent de liquidité</li>
+                    <li>✓ Slippage optimisé (1% au lieu de 2-5%)</li>
+                    <li>✓ Vrais trades exécutés sur BSC</li>
+                    <li>✓ Frais de gas (≈0.003-0.005 BNB par trade)</li>
+                    <li>⚠️ RISQUE DE PERTE TOTALE DU CAPITAL</li>
+                </ul>
+                <div class="mt-3 p-2 bg-cyan-500/20 rounded">
+                    <p class="text-xs text-cyan-100">
+                        💡 <strong>Avantage OpenOcean:</strong> Split automatique des ordres sur plusieurs DEX pour obtenir le meilleur prix global
+                    </p>
+                </div>
+            </div>
         </div>
 
         <!-- Sélection des IA -->
@@ -375,13 +407,17 @@
             CHAIN_ID: 56,
             USDT_ADDRESS: '0x55d398326f99059fF775485246999027B3197955',
             WBNB_ADDRESS: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
-            PANCAKE_ROUTER: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
+            // OpenOcean Exchange Proxy pour BSC
+            OPENOCEAN_EXCHANGE: '0x6352a56caadC4F1E25CD6c75970Fa768A3304e64',
+            OPENOCEAN_API: 'https://open-api.openocean.finance/v3/56', // BSC mainnet
+            PANCAKE_ROUTER: '0x10ED43C718714eb63d5aA57B78B54704E256024E', // Fallback
             TOKEN_ADDRESSES: {
                 'BTCUSDT': '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c',
                 'ETHUSDT': '0x2170Ed0880ac9A755fd29B2688956BD959F933F8',
                 'BNBUSDT': '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'
             },
-            SLIPPAGE: 2.0,
+            USE_OPENOCEAN: true, // Activer OpenOcean par défaut
+            SLIPPAGE: 1.0, // OpenOcean permet slippage plus bas
             MIN_TRADE_AMOUNT: 10
         };
 
@@ -1503,35 +1539,272 @@ Example: BUY|85|Strong positive news sentiment with oversold RSI
                 return;
             }
             
+            // Vérifier si on a assez d'USDT
+            if (tradeAmount > state.balances.usdt) {
+                addLog(aiName, '❌ ACHAT ANNULÉ', `Solde USDT insuffisant: ${state.balances.usdt.toFixed(2)} USDT`);
+                return;
+            }
+            
+            const buyPrice = state.currentPrice;
+            
+            addLog(aiName, '⏳ ACHAT EN COURS', `Préparation achat ${tradeAmount.toFixed(2)} USDT...`);
+            
             try {
-                // Simulation du trade (en production, utiliser PancakeSwap)
-                const buyPrice = state.currentPrice;
+                const tokenAddress = CONFIG.TOKEN_ADDRESSES[state.selectedCrypto];
+                
+                if (!tokenAddress) {
+                    throw new Error('Token non supporté pour trading réel');
+                }
+
+                // ============= UTILISATION OPENOCEAN =============
+                if (CONFIG.USE_OPENOCEAN) {
+                    await executeBuyOpenOcean(aiName, tradeAmount, tokenAddress, buyPrice);
+                } else {
+                    // Fallback PancakeSwap
+                    await executeBuyPancakeSwap(aiName, tradeAmount, tokenAddress, buyPrice);
+                }
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur achat:`, error);
+                
+                let errorMsg = error.message;
+                if (error.code === 'INSUFFICIENT_FUNDS') {
+                    errorMsg = 'Fonds insuffisants pour gas fees';
+                } else if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+                    errorMsg = 'Erreur estimation gas - vérifiez slippage';
+                }
+                
+                addLog(aiName, '❌ ERREUR ACHAT', errorMsg);
+            }
+        }
+
+        async function executeBuyOpenOcean(aiName, tradeAmount, tokenAddress, buyPrice) {
+            addLog(aiName, '🌊 OpenOcean', 'Recherche du meilleur prix sur tous les DEX...');
+            
+            // 1. Obtenir la meilleure route via OpenOcean API
+            const amountWei = ethers.utils.parseUnits(tradeAmount.toString(), 18);
+            
+            const quoteUrl = `${CONFIG.OPENOCEAN_API}/swap_quote?` + 
+                `inTokenAddress=${CONFIG.USDT_ADDRESS}&` +
+                `outTokenAddress=${tokenAddress}&` +
+                `amount=${amountWei.toString()}&` +
+                `gasPrice=5&` +
+                `slippage=${CONFIG.SLIPPAGE}&` +
+                `account=${state.account}`;
+            
+            addLog(aiName, '📊 ANALYSE', 'Comparaison PancakeSwap, Biswap, ApeSwap, DODO...');
+            
+            const quoteResponse = await fetch(quoteUrl);
+            
+            if (!quoteResponse.ok) {
+                throw new Error('OpenOcean API erreur: ' + quoteResponse.statusText);
+            }
+            
+            const quoteData = await quoteResponse.json();
+            
+            if (quoteData.code !== 200) {
+                throw new Error('OpenOcean: ' + (quoteData.error || 'Erreur inconnue'));
+            }
+            
+            const { data } = quoteData;
+            const expectedOut = ethers.utils.formatUnits(data.outAmount, 18);
+            const dexUsed = data.dexes?.join(', ') || 'Multiple DEX';
+            
+            addLog(aiName, '✅ MEILLEUR PRIX', `via ${dexUsed} • Receive: ${parseFloat(expectedOut).toFixed(6)} tokens`);
+            
+            // 2. Vérifier et approuver USDT si nécessaire
+            const usdtContract = new ethers.Contract(
+                CONFIG.USDT_ADDRESS,
+                [
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function approve(address spender, uint256 amount) returns (bool)'
+                ],
+                state.connectionMode === 'privatekey' ? state.privateKeyWallet : state.provider.getSigner()
+            );
+            
+            const allowance = await usdtContract.allowance(state.account, CONFIG.OPENOCEAN_EXCHANGE);
+            
+            if (allowance.lt(amountWei)) {
+                addLog(aiName, '🔓 APPROBATION', 'Approbation USDT pour OpenOcean...');
+                
+                const approveTx = await usdtContract.approve(
+                    CONFIG.OPENOCEAN_EXCHANGE,
+                    ethers.constants.MaxUint256
+                );
+                
+                addLog(aiName, '⏳ CONFIRMATION', 'Attente confirmation approbation...');
+                await approveTx.wait();
+                addLog(aiName, '✅ APPROUVÉ', 'USDT approuvé pour trading');
+            }
+            
+            // 3. Exécuter le swap via OpenOcean
+            addLog(aiName, '💱 SWAP', `Échange ${tradeAmount.toFixed(2)} USDT via ${dexUsed}...`);
+            
+            const signer = state.connectionMode === 'privatekey' ? state.privateKeyWallet : state.provider.getSigner();
+            
+            const swapTx = await signer.sendTransaction({
+                to: data.to,
+                data: data.data,
+                value: data.value || '0',
+                gasLimit: ethers.BigNumber.from(data.estimatedGas || 300000).mul(120).div(100) // +20% safety
+            });
+            
+            addLog(aiName, '⏳ CONFIRMATION', `TX: ${swapTx.hash.slice(0, 10)}...`);
+            
+            const receipt = await swapTx.wait();
+            
+            if (receipt.status === 1) {
+                const tokensReceived = parseFloat(expectedOut);
                 
                 state.positions[aiName] = {
                     entryPrice: buyPrice,
                     amount: tradeAmount,
-                    entryTime: Date.now()
+                    tokensAmount: tokensReceived,
+                    entryTime: Date.now(),
+                    txHash: swapTx.hash,
+                    dex: dexUsed
                 };
                 
                 state.aiStats[aiName].trades++;
                 
-                addLog(aiName, '📈 ACHAT', `${tradeAmount.toFixed(2)} USDT @ $${buyPrice.toFixed(2)}`);
+                addLog(aiName, '✅ ACHAT RÉUSSI', 
+                    `${tradeAmount.toFixed(2)} USDT → ${tokensReceived.toFixed(6)} tokens @ $${buyPrice.toFixed(2)} (${dexUsed})`
+                );
                 
-                console.log(`✅ ${aiName} - ACHAT: ${tradeAmount} USDT @ ${buyPrice}`);
+                await updateBalances();
                 
-            } catch (error) {
-                console.error(`❌ ${aiName} - Erreur achat:`, error);
-                addLog(aiName, '❌ ERREUR ACHAT', error.message);
+                console.log(`✅ ${aiName} - ACHAT via OpenOcean: ${tradeAmount} USDT`);
+                console.log(`📝 TX: https://bscscan.com/tx/${swapTx.hash}`);
+                console.log(`🌊 DEX: ${dexUsed}`);
+                
+            } else {
+                throw new Error('Transaction échouée');
             }
         }
 
         async function executeSell(aiName) {
             if (!state.positions[aiName]) return;
             
+            const position = state.positions[aiName];
+            const sellPrice = state.currentPrice;
+            
+            addLog(aiName, '⏳ VENTE EN COURS', `Préparation vente ${position.tokensAmount.toFixed(6)} tokens...`);
+            
             try {
-                const position = state.positions[aiName];
-                const sellPrice = state.currentPrice;
-                const profit = ((sellPrice - position.entryPrice) / position.entryPrice) * position.amount;
+                const tokenAddress = CONFIG.TOKEN_ADDRESSES[state.selectedCrypto];
+                
+                if (!tokenAddress) {
+                    throw new Error('Token non supporté pour trading réel');
+                }
+
+                // ============= UTILISATION OPENOCEAN =============
+                if (CONFIG.USE_OPENOCEAN) {
+                    await executeSellOpenOcean(aiName, position, tokenAddress, sellPrice);
+                } else {
+                    // Fallback PancakeSwap
+                    await executeSellPancakeSwap(aiName, position, tokenAddress, sellPrice);
+                }
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur vente:`, error);
+                
+                let errorMsg = error.message;
+                if (error.code === 'INSUFFICIENT_FUNDS') {
+                    errorMsg = 'Fonds insuffisants pour gas fees';
+                }
+                
+                addLog(aiName, '❌ ERREUR VENTE', errorMsg);
+            }
+        }
+
+        async function executeSellOpenOcean(aiName, position, tokenAddress, sellPrice) {
+            addLog(aiName, '🌊 OpenOcean', 'Recherche du meilleur prix de vente...');
+            
+            // 1. Vérifier le solde réel
+            const tokenContract = new ethers.Contract(
+                tokenAddress,
+                [
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function approve(address spender, uint256 amount) returns (bool)',
+                    'function balanceOf(address account) view returns (uint256)'
+                ],
+                state.connectionMode === 'privatekey' ? state.privateKeyWallet : state.provider.getSigner()
+            );
+            
+            const tokenBalance = await tokenContract.balanceOf(state.account);
+            const tokenBalanceFormatted = parseFloat(ethers.utils.formatUnits(tokenBalance, 18));
+            
+            if (tokenBalanceFormatted < position.tokensAmount * 0.99) {
+                throw new Error(`Solde token insuffisant: ${tokenBalanceFormatted.toFixed(6)}`);
+            }
+            
+            // 2. Obtenir la meilleure route via OpenOcean API
+            const amountTokenWei = ethers.utils.parseUnits(position.tokensAmount.toString(), 18);
+            
+            const quoteUrl = `${CONFIG.OPENOCEAN_API}/swap_quote?` + 
+                `inTokenAddress=${tokenAddress}&` +
+                `outTokenAddress=${CONFIG.USDT_ADDRESS}&` +
+                `amount=${amountTokenWei.toString()}&` +
+                `gasPrice=5&` +
+                `slippage=${CONFIG.SLIPPAGE}&` +
+                `account=${state.account}`;
+            
+            addLog(aiName, '📊 ANALYSE', 'Comparaison des DEX pour meilleur prix...');
+            
+            const quoteResponse = await fetch(quoteUrl);
+            
+            if (!quoteResponse.ok) {
+                throw new Error('OpenOcean API erreur: ' + quoteResponse.statusText);
+            }
+            
+            const quoteData = await quoteResponse.json();
+            
+            if (quoteData.code !== 200) {
+                throw new Error('OpenOcean: ' + (quoteData.error || 'Erreur inconnue'));
+            }
+            
+            const { data } = quoteData;
+            const usdtOut = ethers.utils.formatUnits(data.outAmount, 18);
+            const dexUsed = data.dexes?.join(', ') || 'Multiple DEX';
+            
+            addLog(aiName, '✅ MEILLEUR PRIX', `via ${dexUsed} • Receive: ${parseFloat(usdtOut).toFixed(2)} USDT`);
+            
+            // 3. Approuver le token si nécessaire
+            const allowance = await tokenContract.allowance(state.account, CONFIG.OPENOCEAN_EXCHANGE);
+            
+            if (allowance.lt(amountTokenWei)) {
+                addLog(aiName, '🔓 APPROBATION', 'Approbation token pour OpenOcean...');
+                
+                const approveTx = await tokenContract.approve(
+                    CONFIG.OPENOCEAN_EXCHANGE,
+                    ethers.constants.MaxUint256
+                );
+                
+                addLog(aiName, '⏳ CONFIRMATION', 'Attente confirmation approbation...');
+                await approveTx.wait();
+                addLog(aiName, '✅ APPROUVÉ', 'Token approuvé pour trading');
+            }
+            
+            // 4. Exécuter le swap
+            addLog(aiName, '💱 SWAP', `Échange ${position.tokensAmount.toFixed(6)} tokens via ${dexUsed}...`);
+            
+            const signer = state.connectionMode === 'privatekey' ? state.privateKeyWallet : state.provider.getSigner();
+            
+            const swapTx = await signer.sendTransaction({
+                to: data.to,
+                data: data.data,
+                value: data.value || '0',
+                gasLimit: ethers.BigNumber.from(data.estimatedGas || 300000).mul(120).div(100)
+            });
+            
+            addLog(aiName, '⏳ CONFIRMATION', `TX: ${swapTx.hash.slice(0, 10)}...`);
+            
+            const receipt = await swapTx.wait();
+            
+            if (receipt.status === 1) {
+                const usdtReceived = parseFloat(usdtOut);
+                const profit = usdtReceived - position.amount;
+                const profitPercent = (profit / position.amount) * 100;
                 
                 state.aiStats[aiName].profit += profit;
                 
@@ -1541,17 +1814,21 @@ Example: BUY|85|Strong positive news sentiment with oversold RSI
                     state.aiStats[aiName].losses++;
                 }
                 
-                addLog(aiName, '📉 VENTE', `${position.amount.toFixed(2)} USDT @ $${sellPrice.toFixed(2)} • Profit: ${profit > 0 ? '+' : ''}${profit.toFixed(2)} USDT`);
+                addLog(aiName, '✅ VENTE RÉUSSIE', 
+                    `${position.tokensAmount.toFixed(6)} tokens → ${usdtReceived.toFixed(2)} USDT | Profit: ${profit > 0 ? '+' : ''}${profit.toFixed(2)} USDT (${profitPercent > 0 ? '+' : ''}${profitPercent.toFixed(2)}%) via ${dexUsed}`
+                );
                 
                 state.positions[aiName] = null;
                 
                 updateAIStats(aiName);
+                await updateBalances();
                 
-                console.log(`✅ ${aiName} - VENTE: Profit ${profit.toFixed(2)} USDT`);
+                console.log(`✅ ${aiName} - VENTE via OpenOcean: Profit ${profit.toFixed(2)} USDT`);
+                console.log(`📝 TX: https://bscscan.com/tx/${swapTx.hash}`);
+                console.log(`🌊 DEX: ${dexUsed}`);
                 
-            } catch (error) {
-                console.error(`❌ ${aiName} - Erreur vente:`, error);
-                addLog(aiName, '❌ ERREUR VENTE', error.message);
+            } else {
+                throw new Error('Transaction échouée');
             }
         }
 
@@ -1692,6 +1969,19 @@ Example: BUY|85|Strong positive news sentiment with oversold RSI
         });
 
         console.log('✅ Bot initialisé - Prêt pour le trading 24/7');
+
+        function updateSlippage() {
+            const slippage = parseFloat(document.getElementById('slippageInput').value);
+            
+            if (slippage < 0.5 || slippage > 10) {
+                alert('❌ Slippage doit être entre 0.5% et 10%');
+                return;
+            }
+            
+            CONFIG.SLIPPAGE = slippage;
+            alert(`✅ Slippage mis à jour: ${slippage}%`);
+            addLog('system', '⚙️ Configuration', `Slippage: ${slippage}%`);
+        }
 
         // ============= GESTION API KEYS =============
         function toggleAPIConfig() {
