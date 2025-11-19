@@ -1240,20 +1240,311 @@
         }
 
         async function executeBuy(aiName) {
-            addLog(aiName, '✅ ACHAT SIMULÉ', 'Position ouverte');
-            state.positions[aiName] = { entryPrice: state.currentPrice, amount: 100 };
-            state.aiStats[aiName].trades++;
+            const tradeAmount = state.capital * 0.3; // 30% du capital par trade
+            
+            if (tradeAmount < CONFIG.MIN_TRADE_AMOUNT) {
+                console.log(`⚠️ ${aiName}: Montant insuffisant`);
+                return;
+            }
+            
+            // Vérifier si on a assez d'USDT
+            if (tradeAmount > state.balances.usdt) {
+                addLog(aiName, '❌ ACHAT ANNULÉ', `Solde USDT insuffisant: ${state.balances.usdt.toFixed(2)} USDT`);
+                return;
+            }
+            
+            const buyPrice = state.currentPrice;
+            
+            addLog(aiName, '⏳ ACHAT EN COURS', `Préparation achat ${tradeAmount.toFixed(2)} USDT via PancakeSwap...`);
+            
+            try {
+                const tokenAddress = CONFIG.TOKEN_ADDRESSES[state.selectedCrypto];
+                
+                if (!tokenAddress) {
+                    throw new Error('Token non supporté pour trading réel');
+                }
+
+                await executeBuyPancakeSwap(aiName, tradeAmount, tokenAddress, buyPrice);
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur achat:`, error);
+                
+                let errorMsg = error.message;
+                if (error.code === 'INSUFFICIENT_FUNDS') {
+                    errorMsg = 'Fonds insuffisants pour gas fees';
+                } else if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+                    errorMsg = 'Erreur estimation gas - vérifiez slippage';
+                } else if (error.message.includes('INSUFFICIENT_OUTPUT_AMOUNT')) {
+                    errorMsg = 'Slippage trop faible - augmentez le slippage';
+                }
+                
+                addLog(aiName, '❌ ERREUR ACHAT', errorMsg);
+            }
+        }
+
+        async function executeBuyPancakeSwap(aiName, tradeAmount, tokenAddress, buyPrice) {
+            addLog(aiName, '🥞 PancakeSwap', 'Connexion au routeur PancakeSwap V2...');
+            
+            // 1. Vérifier et approuver USDT si nécessaire
+            const signer = state.connectionMode === 'privatekey' ? state.privateKeyWallet : state.provider.getSigner();
+            
+            const usdtContract = new ethers.Contract(
+                CONFIG.USDT_ADDRESS,
+                [
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function approve(address spender, uint256 amount) returns (bool)'
+                ],
+                signer
+            );
+            
+            const amountWei = ethers.utils.parseUnits(tradeAmount.toString(), 18);
+            const allowance = await usdtContract.allowance(state.account, CONFIG.PANCAKE_ROUTER);
+            
+            if (allowance.lt(amountWei)) {
+                addLog(aiName, '🔓 APPROBATION', 'Approbation USDT pour PancakeSwap...');
+                
+                const approveTx = await usdtContract.approve(
+                    CONFIG.PANCAKE_ROUTER,
+                    ethers.constants.MaxUint256
+                );
+                
+                addLog(aiName, '⏳ CONFIRMATION', `TX Approve: ${approveTx.hash.slice(0, 10)}...`);
+                await approveTx.wait();
+                addLog(aiName, '✅ APPROUVÉ', 'USDT approuvé pour trading');
+            }
+            
+            // 2. Préparer le swap via PancakeSwap Router
+            const routerABI = [
+                'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+                'function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)'
+            ];
+            
+            const routerContract = new ethers.Contract(CONFIG.PANCAKE_ROUTER, routerABI, signer);
+            
+            // Path: USDT -> WBNB -> Token (ou direct si pair existe)
+            const path = [CONFIG.USDT_ADDRESS, tokenAddress];
+            
+            // Obtenir le montant estimé de tokens à recevoir
+            addLog(aiName, '📊 CALCUL', 'Estimation du prix sur PancakeSwap...');
+            const amountsOut = await routerContract.getAmountsOut(amountWei, path);
+            const expectedOut = amountsOut[amountsOut.length - 1];
+            
+            // Calculer le minimum avec slippage
+            const slippageTolerance = CONFIG.SLIPPAGE / 100;
+            const amountOutMin = expectedOut.mul(Math.floor((1 - slippageTolerance) * 10000)).div(10000);
+            
+            const expectedTokens = parseFloat(ethers.utils.formatUnits(expectedOut, 18));
+            const minTokens = parseFloat(ethers.utils.formatUnits(amountOutMin, 18));
+            
+            addLog(aiName, '📈 ESTIMATION', 
+                `Recevoir: ${expectedTokens.toFixed(6)} tokens (min: ${minTokens.toFixed(6)} avec ${CONFIG.SLIPPAGE}% slippage)`
+            );
+            
+            // 3. Exécuter le swap
+            const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
+            
+            addLog(aiName, '💱 SWAP', `Échange ${tradeAmount.toFixed(2)} USDT via PancakeSwap...`);
+            
+            const swapTx = await routerContract.swapExactTokensForTokens(
+                amountWei,
+                amountOutMin,
+                path,
+                state.account,
+                deadline,
+                {
+                    gasLimit: 300000 // Gas limit pour swap
+                }
+            );
+            
+            addLog(aiName, '⏳ BLOCKCHAIN', `Attente validation... TX: ${swapTx.hash.slice(0, 10)}...`);
+            addLog(aiName, '🔗 BSCSCAN', `https://bscscan.com/tx/${swapTx.hash}`);
+            
+            const receipt = await swapTx.wait();
+            
+            if (receipt.status === 1) {
+                const tokensReceived = expectedTokens;
+                
+                state.positions[aiName] = {
+                    entryPrice: buyPrice,
+                    amount: tradeAmount,
+                    tokensAmount: tokensReceived,
+                    entryTime: Date.now(),
+                    txHash: swapTx.hash
+                };
+                
+                state.aiStats[aiName].trades++;
+                
+                addLog(aiName, '✅ ACHAT RÉUSSI', 
+                    `${tradeAmount.toFixed(2)} USDT → ${tokensReceived.toFixed(6)} tokens @ $${buyPrice.toFixed(2)}`
+                );
+                addLog(aiName, '🎉 CONFIRMÉ', `Bloc: ${receipt.blockNumber} | Gas: ${receipt.gasUsed.toString()}`);
+                
+                await updateBalances();
+                
+                console.log(`✅ ${aiName} - ACHAT RÉEL via PancakeSwap: ${tradeAmount} USDT`);
+                console.log(`📝 TX: https://bscscan.com/tx/${swapTx.hash}`);
+                
+            } else {
+                throw new Error('Transaction échouée sur la blockchain');
+            }
         }
 
         async function executeSell(aiName) {
-            const profit = (state.currentPrice - state.positions[aiName].entryPrice) * 10;
-            state.aiStats[aiName].profit += profit;
-            if (profit > 0) state.aiStats[aiName].wins++;
-            else state.aiStats[aiName].losses++;
+            if (!state.positions[aiName]) return;
             
-            addLog(aiName, '✅ VENTE SIMULÉE', `Profit: $${profit.toFixed(2)}`);
-            state.positions[aiName] = null;
-            updateAIStats(aiName);
+            const position = state.positions[aiName];
+            const sellPrice = state.currentPrice;
+            
+            addLog(aiName, '⏳ VENTE EN COURS', `Préparation vente ${position.tokensAmount.toFixed(6)} tokens via PancakeSwap...`);
+            
+            try {
+                const tokenAddress = CONFIG.TOKEN_ADDRESSES[state.selectedCrypto];
+                
+                if (!tokenAddress) {
+                    throw new Error('Token non supporté pour trading réel');
+                }
+
+                await executeSellPancakeSwap(aiName, position, tokenAddress, sellPrice);
+                
+            } catch (error) {
+                console.error(`❌ ${aiName} - Erreur vente:`, error);
+                
+                let errorMsg = error.message;
+                if (error.code === 'INSUFFICIENT_FUNDS') {
+                    errorMsg = 'Fonds insuffisants pour gas fees';
+                } else if (error.message.includes('INSUFFICIENT_OUTPUT_AMOUNT')) {
+                    errorMsg = 'Slippage trop faible - augmentez le slippage';
+                }
+                
+                addLog(aiName, '❌ ERREUR VENTE', errorMsg);
+            }
+        }
+
+        async function executeSellPancakeSwap(aiName, position, tokenAddress, sellPrice) {
+            addLog(aiName, '🥞 PancakeSwap', 'Connexion au routeur pour vente...');
+            
+            const signer = state.connectionMode === 'privatekey' ? state.privateKeyWallet : state.provider.getSigner();
+            
+            // 1. Vérifier le solde réel
+            const tokenContract = new ethers.Contract(
+                tokenAddress,
+                [
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function approve(address spender, uint256 amount) returns (bool)',
+                    'function balanceOf(address account) view returns (uint256)'
+                ],
+                signer
+            );
+            
+            const tokenBalance = await tokenContract.balanceOf(state.account);
+            const tokenBalanceFormatted = parseFloat(ethers.utils.formatUnits(tokenBalance, 18));
+            
+            if (tokenBalanceFormatted < position.tokensAmount * 0.99) {
+                throw new Error(`Solde token insuffisant: ${tokenBalanceFormatted.toFixed(6)}`);
+            }
+            
+            addLog(aiName, '💰 SOLDE', `${tokenBalanceFormatted.toFixed(6)} tokens disponibles`);
+            
+            // 2. Approuver le token si nécessaire
+            const amountTokenWei = ethers.utils.parseUnits(position.tokensAmount.toString(), 18);
+            const allowance = await tokenContract.allowance(state.account, CONFIG.PANCAKE_ROUTER);
+            
+            if (allowance.lt(amountTokenWei)) {
+                addLog(aiName, '🔓 APPROBATION', 'Approbation token pour PancakeSwap...');
+                
+                const approveTx = await tokenContract.approve(
+                    CONFIG.PANCAKE_ROUTER,
+                    ethers.constants.MaxUint256
+                );
+                
+                addLog(aiName, '⏳ CONFIRMATION', `TX Approve: ${approveTx.hash.slice(0, 10)}...`);
+                await approveTx.wait();
+                addLog(aiName, '✅ APPROUVÉ', 'Token approuvé pour vente');
+            }
+            
+            // 3. Obtenir l'estimation
+            const routerABI = [
+                'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+                'function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)'
+            ];
+            
+            const routerContract = new ethers.Contract(CONFIG.PANCAKE_ROUTER, routerABI, signer);
+            
+            // Path: Token -> USDT
+            const path = [tokenAddress, CONFIG.USDT_ADDRESS];
+            
+            addLog(aiName, '📊 CALCUL', 'Estimation du prix de vente...');
+            const amountsOut = await routerContract.getAmountsOut(amountTokenWei, path);
+            const expectedUSDT = amountsOut[amountsOut.length - 1];
+            
+            // Calculer le minimum avec slippage
+            const slippageTolerance = CONFIG.SLIPPAGE / 100;
+            const amountOutMin = expectedUSDT.mul(Math.floor((1 - slippageTolerance) * 10000)).div(10000);
+            
+            const expectedUSDTFormatted = parseFloat(ethers.utils.formatUnits(expectedUSDT, 18));
+            const minUSDTFormatted = parseFloat(ethers.utils.formatUnits(amountOutMin, 18));
+            
+            addLog(aiName, '📈 ESTIMATION', 
+                `Recevoir: ${expectedUSDTFormatted.toFixed(2)} USDT (min: ${minUSDTFormatted.toFixed(2)} avec ${CONFIG.SLIPPAGE}% slippage)`
+            );
+            
+            // 4. Exécuter le swap
+            const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
+            
+            addLog(aiName, '💱 SWAP', `Vente ${position.tokensAmount.toFixed(6)} tokens via PancakeSwap...`);
+            
+            const swapTx = await routerContract.swapExactTokensForTokens(
+                amountTokenWei,
+                amountOutMin,
+                path,
+                state.account,
+                deadline,
+                {
+                    gasLimit: 300000
+                }
+            );
+            
+            addLog(aiName, '⏳ BLOCKCHAIN', `Attente validation... TX: ${swapTx.hash.slice(0, 10)}...`);
+            addLog(aiName, '🔗 BSCSCAN', `https://bscscan.com/tx/${swapTx.hash}`);
+            
+            const receipt = await swapTx.wait();
+            
+            if (receipt.status === 1) {
+                const usdtReceived = expectedUSDTFormatted;
+                const profit = usdtReceived - position.amount;
+                const profitPercent = (profit / position.amount) * 100;
+                
+                state.aiStats[aiName].profit += profit;
+                
+                if (profit > 0) {
+                    state.aiStats[aiName].wins++;
+                } else {
+                    state.aiStats[aiName].losses++;
+                }
+                
+                const holdTime = Math.floor((Date.now() - position.entryTime) / 1000);
+                const holdMinutes = Math.floor(holdTime / 60);
+                const holdSeconds = holdTime % 60;
+                
+                addLog(aiName, '✅ VENTE RÉUSSIE', 
+                    `${position.tokensAmount.toFixed(6)} tokens → ${usdtReceived.toFixed(2)} USDT`
+                );
+                addLog(aiName, '💰 PROFIT', 
+                    `${profit > 0 ? '+' : ''}${profit.toFixed(2)} USDT (${profitPercent > 0 ? '+' : ''}${profitPercent.toFixed(2)}%) | Durée: ${holdMinutes}m ${holdSeconds}s`
+                );
+                addLog(aiName, '🎉 CONFIRMÉ', `Bloc: ${receipt.blockNumber} | Gas: ${receipt.gasUsed.toString()}`);
+                
+                state.positions[aiName] = null;
+                
+                updateAIStats(aiName);
+                await updateBalances();
+                
+                console.log(`✅ ${aiName} - VENTE RÉELLE via PancakeSwap: Profit ${profit.toFixed(2)} USDT`);
+                console.log(`📝 TX: https://bscscan.com/tx/${swapTx.hash}`);
+                
+            } else {
+                throw new Error('Transaction échouée sur la blockchain');
+            }
         }
 
         function updateAIStats(aiName) {
